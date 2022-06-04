@@ -1,8 +1,7 @@
 from picamera import PiCamera
-import RPi.GPIO as GPIO
 import time
 from time import sleep
-from gpiozero import LED
+from gpiozero import LED, Button, PWMLED
 from PIL import Image, ImageDraw, ImageFont
 import datetime as dt
 import itertools
@@ -20,7 +19,6 @@ img1 = Image.open(assetLocation + 'number1.png')
 img2 = Image.open(assetLocation + 'number2.png')
 img3 = Image.open(assetLocation + 'number3.png')
 
-
 photo1 = "001.jpg"
 photo2 = "002.jpg"
 photo3 = "003.jpg"
@@ -32,11 +30,15 @@ buttonEvent = False
 
         
 flash = LED(26)
+button = Button(17)
+button_led = PWMLED(21)
+button_led.pulse()
+use_flash = True
+
 camera = PiCamera()
 # camera.resolution = (3280,2464)
 camera.resolution = (2592,1944)
 camera.framerate = 15
-number_pin_button = 17
 
 pad = Image.new('RGB',(
     ((img1.size[0]+31)//32)*32,
@@ -68,69 +70,32 @@ c = camera.add_overlay(pad.tobytes(), size=img3.size)
 c.alpha = 0
 c.layer = 5
 
-class BlinkingLed:
-    def __init__(self):
-        self.counter = 0
-        self.number_pin = 21
-        self.ascending = True
-        
-    def initialize(self):
-        GPIO.setup(self.number_pin, GPIO.OUT)
-        self.led = GPIO.PWM(self.number_pin, 100)
-        self.led.start(0)
-    
-    def update(self):
-        '''
-            limit * multiplier = 100, otherwise this does not work
-        '''
-        limit = 25;
-        multiplier = 4;
-        if self.ascending:
-            self.counter += 1
-        else:
-            self.counter -= 1
-        if self.counter <= 0:
-            self.ascending = True
-        elif self.counter >= limit:
-            self.ascending = False
-        
-        self.led.ChangeDutyCycle(min(max(self.counter*multiplier, 0.0), 100.0))
-        
-blinking_led = BlinkingLed()
-
-def play():
+def setup():
     print("Welcome to the photo booth")
     if not os.path.exists(saveLocation):
         os.makedirs(saveLocation)
     camera.start_preview(resolution=(1280, 720))
     camera.annotate_text = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     camera.annotate_text_size = 80
-    blinking_led.initialize()
-    if len(sys.argv) > 1 and sys.argv[1] == "--instant":
-        takePictures()
-        return
+    button.when_pressed = takePictures
+    if len(sys.argv) > 1: 
+        if sys.argv[1] == "--instant":
+            takePictures()
+            return
+        elif sys.argv[1] == "--noflash":
+            global use_flash
+            use_flash = False
 
-
+def loop():
     while True:
-        try:
-            time.sleep(0.1)
-            blinking_led.update();
-            if waitForButtonPress(number_pin_button):
-                takePictures()
-                
-        except KeyboardInterrupt:
-            GPIO.cleanup()
-            camera.stop_preview()
-            break
-        
-def waitForButtonPress(number_pin):
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(number_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        time.sleep(0.1)
 
-    input_state = GPIO.input(number_pin)
-    return input_state == False
+def destroy():
+    toggleFlash(False);
+    camera.stop_preview()
 
 def takePictures():
+    print("Taking pictures!")
     fileName = time.strftime("%Y%m%d-%H%M%S")+".jpg"
     camera.annotate_text = ''
     flashProcedure()
@@ -141,7 +106,7 @@ def takePictures():
     captureImage(photo3)
     flashProcedure()
     captureImage(photo4)
-    flash.off()
+    toggleFlash(False)
     convertMergeImages(fileName)
     #printPic(fileName)
     camera.annotate_text = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -174,26 +139,31 @@ def printPic(fileName):
     conn.printFile (default_printer, saveLocation + fileName, "hl110",{'fit-to-page':'True'})
 
 def flashProcedure():
-    flash.on()
+    toggleFlash(True)
     c.alpha = 128
     sleep(0.5)
-    flash.off()
+    toggleFlash(False)
     c.alpha = 0
     sleep(0.5)
-    flash.on()
+    toggleFlash(True)
     b.alpha = 128
     sleep(0.5)
-    flash.off()
+    toggleFlash(False)
     b.alpha = 0
     sleep(0.5)
-    flash.on()
+    toggleFlash(True)
     a.alpha = 128
     sleep(0.5)
     a.alpha = 0
 
+def toggleFlash(state):
+    if use_flash == False:
+        return
+    flash.value = int(state == True)
+
 def captureImage(imageName):
     camera.capture(saveLocation + imageName)
-    flash.off()
+    toggleFlash(False)
 
 def addPreviewOverlay(xcoord,ycoord,fontSize,overlayText):
     global overlay_renderer
@@ -209,5 +179,11 @@ def addPreviewOverlay(xcoord,ycoord,fontSize,overlayText):
     else:
         overlay_renderer.update(img.tobytes())
 
-play()
 
+if __name__ == '__main__' :
+    setup()
+    try:
+        loop()
+    # except KeyboardInterrupt: # When Ctrl + C is pressed, execute this
+    finally:
+        destroy()
