@@ -77,9 +77,7 @@ def setup():
     print("Welcome to the photo booth")
     if not os.path.exists(saveLocation):
         os.makedirs(saveLocation)
-    camera.start_preview(resolution=(1280, 720))
-    camera.annotate_text = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    camera.annotate_text_size = 80
+    camera.start_preview(resolution=(1280, 720), hflip=True)
     button.when_pressed = takePictures
     if len(sys.argv) > 1: 
         if sys.argv[1] == "--instant":
@@ -88,6 +86,7 @@ def setup():
         elif sys.argv[1] == "--noflash":
             global use_flash
             use_flash = False
+    return 0
 
 def loop():
     while True:
@@ -99,35 +98,37 @@ def destroy():
 
 def takePictures():
     print("Taking pictures!")
-    fileName = time.strftime("%Y%m%d-%H%M%S")+".jpg"
+    datetime = time.strftime("%Y%m%d-%H%M%S")
+    fileName = datetime +".jpg"
     camera.annotate_text = ''
     flashProcedure()
-    captureImage(photo1)
+    one = captureImage(photo1, datetime)
     flashProcedure()
-    captureImage(photo2)
+    two = captureImage(photo2, datetime)
     flashProcedure()
-    captureImage(photo3)
+    three = captureImage(photo3, datetime)
     flashProcedure()
-    captureImage(photo4)
+    four = captureImage(photo4, datetime)
     toggleFlash(False)
-    montagePath = convertMergeImages(fileName)
+    montagePath = convertMergeImages(fileName, one, two, three, four)
     try: # not sure what will happen if some WIFI blocks the upload, so just try catch for safety.
         uploadMontage(montagePath)
     except Exception as e:
         print("Something went wrong when uploading the montage.")
         print(e)
     #printPic(fileName)
-    camera.annotate_text = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # camera.annotate_text = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-def convertMergeImages(fileName):
+def convertMergeImages(fileName, one, two, three, four):
+    print(f"Creating montage {fileName} from {one}, {two}, {three}, {four}")
     outputFile = saveLocation + fileName
     subprocess.call([
         "montage", 
         "-monitor",
-        saveLocation + photo1, 
-        saveLocation + photo2, 
-        saveLocation + photo3, 
-        saveLocation + photo4, 
+        one, 
+        two, 
+        three, 
+        four, 
         "-geometry", "512x384+5+5", 
         outputFile
         ])
@@ -189,9 +190,11 @@ def toggleFlash(state):
         return
     flash.value = int(state == True)
 
-def captureImage(imageName):
-    camera.capture(saveLocation + imageName)
+def captureImage(imageName, timestamp):
+    imageName = saveLocation + timestamp + imageName;
+    camera.capture(imageName)
     toggleFlash(False)
+    return imageName
 
 def addPreviewOverlay(xcoord,ycoord,fontSize,overlayText):
     global overlay_renderer
