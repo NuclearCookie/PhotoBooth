@@ -11,13 +11,16 @@ import os
 from shutil import copyfile
 import sys
 import time
+import pysftp
 
+eventName = "Bram_Nancy"
 assetLocation = '/home/photokanon/PhotoBooth/assets/';
-saveLocation = '/home/photokanon/Documents/PhotoBooth/PhotoboothPictures/';
+saveLocation = f'/home/photokanon/Documents/PhotoBooth/PhotoboothPictures/{eventName}/';
 
 img1 = Image.open(assetLocation + 'number1.png')
 img2 = Image.open(assetLocation + 'number2.png')
 img3 = Image.open(assetLocation + 'number3.png')
+credentials = [x.strip() for x in open("credentials.txt", "r").readlines()]
 
 photo1 = "001.jpg"
 photo2 = "002.jpg"
@@ -81,7 +84,7 @@ def setup():
     if len(sys.argv) > 1: 
         if sys.argv[1] == "--instant":
             takePictures()
-            return
+            return 1
         elif sys.argv[1] == "--noflash":
             global use_flash
             use_flash = False
@@ -107,27 +110,52 @@ def takePictures():
     flashProcedure()
     captureImage(photo4)
     toggleFlash(False)
-    convertMergeImages(fileName)
+    montagePath = convertMergeImages(fileName)
+    try: # not sure what will happen if some WIFI blocks the upload, so just try catch for safety.
+        uploadMontage(montagePath)
+    except Exception as e:
+        print("Something went wrong when uploading the montage.")
+        print(e)
     #printPic(fileName)
     camera.annotate_text = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 def convertMergeImages(fileName):
+    outputFile = saveLocation + fileName
     subprocess.call([
         "montage", 
+        "-monitor",
         saveLocation + photo1, 
         saveLocation + photo2, 
         saveLocation + photo3, 
         saveLocation + photo4, 
         "-geometry", "512x384+5+5", 
-        saveLocation + fileName
+        outputFile
         ])
     subprocess.call([
         "montage",
-        saveLocation + fileName, 
+        "-monitor",
+        outputFile, 
         assetLocation + "banner.jpg",
         "-tile", "1x2",
         "-geometry", "+5+5",
-        saveLocation + fileName
+        outputFile
+    ])
+    return outputFile
+
+def uploadMontage(montagePath):
+    cnopts = pysftp.CnOpts()
+    cnopts.hostkeys = None # Not advised, but we're only uploading to this server. if there would be a Man in the Middle attack, we'd still only upload to the wrong target. No biggy.
+    print("start uploading montage.")
+    with pysftp.Connection(credentials[0], username=credentials[1], password=credentials[2], cnopts=cnopts) as sftp:
+        with sftp.cd(f'photobooth/galleries/{eventName}'):
+            sftp.put(montagePath)
+    print("Done uploading montage.")
+    subprocess.call([
+        "perl",
+        "remote_sync.pl",
+        f"--base_url={credentials[3]}",
+        f"--username={credentials[4]}",
+        f"--password={credentials[5]}"
     ])
 
 def printPic(fileName):
@@ -181,9 +209,12 @@ def addPreviewOverlay(xcoord,ycoord,fontSize,overlayText):
 
 
 if __name__ == '__main__' :
-    setup()
-    try:
-        loop()
-    # except KeyboardInterrupt: # When Ctrl + C is pressed, execute this
-    finally:
+    result = setup()
+    if result is not 0:
         destroy()
+    else:
+        try:
+            loop()
+        # except KeyboardInterrupt: # When Ctrl + C is pressed, execute this
+        finally:
+            destroy()
