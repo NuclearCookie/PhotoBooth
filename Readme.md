@@ -19,3 +19,13 @@ sftpPassword
 piwigoBaseURL
 piwigoAdminUserName
 piwigoAdminPassword
+
+# Memory
+
+On Raspberry Pi 3B+, there wasn't enough memory available to render all overlays.
+Configure these settings in `/boot/config.txt` to fix:
+
+```
+gpu_mem=256 # Bump GPU memory up a bit to use the below setting
+dispmanx_offline=1 # off screen render buffers
+```

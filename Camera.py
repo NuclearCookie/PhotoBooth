@@ -20,6 +20,7 @@ saveLocation = f'/home/photokanon/Documents/PhotoBooth/PhotoboothPictures/{event
 img1 = Image.open(assetLocation + 'number1.png')
 img2 = Image.open(assetLocation + 'number2.png')
 img3 = Image.open(assetLocation + 'number3.png')
+imgCalibrating = Image.open(assetLocation + 'calibrating.png')
 credentials = [x.strip() for x in open("credentials.txt", "r").readlines()]
 
 photo1 = "001.jpg"
@@ -31,7 +32,10 @@ overlay_renderer = False
 
 buttonEvent = False
 
-        
+# :TODO: update flash to use flash_mode instead? (professional flash timings)
+# https://forums.raspberrypi.com/viewtopic.php?t=165910
+# https://picamera.readthedocs.io/en/release-1.13/api_camera.html#picamera.PiCamera.flash_mode
+
 flash = LED(26)
 button = Button(17)
 button_led = PWMLED(21)
@@ -43,49 +47,47 @@ camera = PiCamera()
 camera.resolution = (2592,1944)
 camera.framerate = 15
 
-pad = Image.new('RGB',(
-    ((img1.size[0]+31)//32)*32,
-    ((img1.size[1]+15)//16)*16,
-    ))
-pad.paste(img1, (0,0))
+def addImageOverlay(image, layer):
+    pad = Image.new('RGBA',(
+        ((image.size[0]+31)//32)*32,
+        ((image.size[1]+15)//16)*16,
+        ))
+    pad.paste(image, (0,0), image)
 
-a = camera.add_overlay(pad.tobytes(), size=img1.size)
-a.alpha = 0
-a.layer = 3
+    overlay = camera.add_overlay(pad.tobytes(), size=image.size)
+    overlay.layer = 0
+    return overlay
 
-pad = Image.new('RGB',(
-    ((img2.size[0]+31)//32)*32,
-    ((img2.size[1]+15)//16)*16,
-    ))
-pad.paste(img2, (0,0))
+# Black bars behind preview?
+bb = Image.new('RGB',(
+        ((1280+31)//32)*32,
+        ((760+15)//16)*16,
+        ))
+# draw = ImageDraw.Draw(bb)
+# draw.rectangle([0, 0, 32, 32], "black")
+bbOverlay = camera.add_overlay(bb.tobytes(), size=bb.size)
+bbOverlay.layer = 1
 
-b = camera.add_overlay(pad.tobytes(), size=img2.size)
-b.alpha = 0
-b.layer = 4
 
-pad = Image.new('RGB',(
-    ((img3.size[0]+31)//32)*32,
-    ((img3.size[1]+15)//16)*16,
-    ))
-pad.paste(img3, (0,0))
+a = addImageOverlay(img1, 3)
+b = addImageOverlay(img2, 4)
+c = addImageOverlay(img3, 5)
+calibrateOverlay = addImageOverlay(imgCalibrating, 6)
 
-c = camera.add_overlay(pad.tobytes(), size=img3.size)
-c.alpha = 0
-c.layer = 5
 
 def setup():
     print("Welcome to the photo booth")
     if not os.path.exists(saveLocation):
         os.makedirs(saveLocation)
-    camera.start_preview(resolution=(1280, 720), hflip=True)
+    camera.start_preview(resolution=(1013, 760), hflip=True, alpha=255) # keep same AR as the actual capture
     button.when_pressed = takePictures
-    if len(sys.argv) > 1: 
-        if sys.argv[1] == "--instant":
-            takePictures()
-            return 1
-        elif sys.argv[1] == "--noflash":
+    if len(sys.argv) > 1:
+        if '--noflash' in sys.argv:
             global use_flash
             use_flash = False
+        if '--instant' in sys.argv:
+            takePictures()
+            return 1
     return 0
 
 def loop():
@@ -101,6 +103,7 @@ def takePictures():
     datetime = time.strftime("%Y%m%d-%H%M%S")
     fileName = datetime +".jpg"
     camera.annotate_text = ''
+    calibrateAwb()
     flashProcedure()
     one = captureImage(photo1, datetime)
     flashProcedure()
@@ -123,19 +126,19 @@ def convertMergeImages(fileName, one, two, three, four):
     print(f"Creating montage {fileName} from {one}, {two}, {three}, {four}")
     outputFile = saveLocation + fileName
     subprocess.call([
-        "montage", 
+        "montage",
         "-monitor",
-        one, 
-        two, 
-        three, 
-        four, 
-        "-geometry", "512x384+5+5", 
+        one,
+        two,
+        three,
+        four,
+        "-geometry", "512x384+5+5",
         outputFile
         ])
     subprocess.call([
         "montage",
         "-monitor",
-        outputFile, 
+        outputFile,
         assetLocation + "banner.jpg",
         "-tile", "1x2",
         "-geometry", "+5+5",
@@ -159,31 +162,42 @@ def uploadMontage(montagePath):
         f"--password={credentials[5]}"
     ])
 
-def printPic(fileName):
-    addPreviewOverlay(100,200,55,"Printing")
-    conn = cups.Connection()
-    printers = conn.getPrinters()
-    default_printer = list(printers.keys())[0]
-    cups.setUser('pi')
-    conn.printFile (default_printer, saveLocation + fileName, "hl110",{'fit-to-page':'True'})
+# def printPic(fileName):
+#     addPreviewOverlay(100,200,55,"Printing")
+#     conn = cups.Connection()
+#     printers = conn.getPrinters()
+#     default_printer = list(printers.keys())[0]
+#     cups.setUser('pi')
+#     conn.printFile (default_printer, saveLocation + fileName, "hl110",{'fit-to-page':'True'})
+
+def calibrateAwb():
+    calibrateOverlay.layer = 3
+    toggleFlash(True)
+    sleep(2)
+    gains = camera.awb_gains
+    print(f"Saving awb gains: {gains}")
+    camera.awb_mode = 'off' # This should save the current awb gains?
+    camera.awb_gains = gains
+    toggleFlash(False)
+    calibrateOverlay.layer = 0
 
 def flashProcedure():
     toggleFlash(True)
-    c.alpha = 128
+    c.layer = 4
     sleep(0.5)
     toggleFlash(False)
-    c.alpha = 0
+    c.layer = 0
     sleep(0.5)
     toggleFlash(True)
-    b.alpha = 128
+    b.layer = 4
     sleep(0.5)
     toggleFlash(False)
-    b.alpha = 0
+    b.layer = 0
     sleep(0.5)
     toggleFlash(True)
-    a.alpha = 128
+    a.layer = 4
     sleep(0.5)
-    a.alpha = 0
+    a.layer = 0
 
 def toggleFlash(state):
     if use_flash == False:
@@ -192,23 +206,28 @@ def toggleFlash(state):
 
 def captureImage(imageName, timestamp):
     imageName = saveLocation + timestamp + imageName;
+    print(f"Capturing picture with awb: {camera.awb_gains}")
     camera.capture(imageName)
     toggleFlash(False)
+    # An attempt at hijacking the black bars overlay to create a shutter effect. Doesn't look good.
+    # bbOverlay.layer = 5
+    # sleep(0.5)
+    # bbOverlay.layer = 1
     return imageName
 
-def addPreviewOverlay(xcoord,ycoord,fontSize,overlayText):
-    global overlay_renderer
-    img = Image.new("RGB" , (640,480))
-    draw = ImageDraw.Draw(img)
-    draw.text((xcoord, ycoord), overlayText, (255, 20, 147))
-    
-    if not overlay_renderer:
-        overlay_renderer = camera.add_overlay(img.tobytes(),
-                                              layer=3,
-                                              size=img.size,
-                                              alpha=128);
-    else:
-        overlay_renderer.update(img.tobytes())
+# def addPreviewOverlay(xcoord,ycoord,fontSize,overlayText):
+#     global overlay_renderer
+#     img = Image.new("RGBA" , (640,480))
+#     draw = ImageDraw.Draw(img)
+#     draw.text((xcoord, ycoord), overlayText, (255, 20, 147))
+
+#     if not overlay_renderer:
+#         overlay_renderer = camera.add_overlay(img.tobytes(),
+#                                               layer=3,
+#                                               size=img.size,
+#                                               alpha=255);
+#     else:
+#         overlay_renderer.update(img.tobytes())
 
 
 if __name__ == '__main__' :
