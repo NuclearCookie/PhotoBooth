@@ -172,6 +172,7 @@ def uploadMontage(montagePath):
 
 def calibrateAwb():
     calibrateOverlay.layer = 3
+    camera.awb_mode = 'auto'
     toggleFlash(True)
     sleep(2)
     gains = camera.awb_gains
