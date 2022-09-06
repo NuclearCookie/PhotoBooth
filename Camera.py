@@ -37,13 +37,14 @@ buttonEvent = False
 
 flash = LED(26)
 button = Button(17)
-button_led = PWMLED(21)
-button_led.pulse()
+# There's no LED in the button at the moment. 
+# button_led = PWMLED(21)
+# button_led.pulse()
 use_flash = True
 
 camera = PiCamera()
 # camera.resolution = (3280,2464)
-camera.resolution = (2592,1944)
+camera.resolution = (2592,1944) #4:3 AR
 camera.framerate = 15
 
 def addImageOverlay(image, layer):
